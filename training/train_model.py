@@ -25,6 +25,7 @@ bucket = client.get_bucket('recipes-with-images')
 # 	'data': 'gs://recipes-with-images/data_one_hot.csv'
 # }
 
+image_blobs = bucket.list_blobs(prefix='images')
 
 disc_dropout = 0.5
 gen_dropout = 0.5
@@ -98,7 +99,7 @@ def generator(number_input):
 	return model
 
 
-def train(gen_model, disc_model, adv_model, x_train, y_train, number_of_categories, number_of_ingredients):
+def train(gen_model, disc_model, adv_model, y_train, number_of_categories, number_of_ingredients):
 	number_epochs = 10000
 	batch_size = 64
 
@@ -106,8 +107,9 @@ def train(gen_model, disc_model, adv_model, x_train, y_train, number_of_categori
 	adv_loss = np.array([0., 0.])
 
 	for i in range(number_epochs):
-		indices = np.random.randint(0, x_train.shape[0], size=batch_size)
-		real_images = x_train[indices]  # TODO: Need to get the training images somehow
+		indices = np.random.randint(0, y_train.shape[0], size=batch_size)
+		# real_images = x_train[indices]  # TODO: Need to get the training images somehow
+		real_images = loadTrainingData(indices)
 		real_y = y_train[indices, :]
 
 		noise = np.random.uniform(-1., 1., size=[batch_size, 50])
@@ -190,14 +192,27 @@ def getTrainingDataInSameOrder(x_train, y_train):
 # def tempDownloadFiles():
 # 	# urllib.request.Request('gs://recipes-with-images/')
 
-# def loadTrainingData(indices):
-# 	# Indices correspond to image file names
-# 	# TODO: Maybe I should load all images at once??
-# 	filenames = ["images/"+str(index)+".jpg" for index in indices]
-# 	raw_imgs = [tf.read_file(filename) for filename in filenames]
-# 	img_tensors = [(tf.image.decode_image(raw_img - 128)) / 128 for raw_img in raw_imgs]
+def loadTrainingData(indices):
+	# Indices correspond to image file names
+	# TODO: Maybe I should load all images at once??
+	applicable_image_blobs = [blob for blob in image_blobs if int(blob.name[7:-4]) in indices]
 
-# 	return img_tensors
+	for blob in applicable_image_blobs:
+		filename = 'tmp/' + str(blob.name)
+		with open(filename, 'wb+') as file_to:
+			try:
+				client.download_blob_to_file(blob, file_to)
+			except e:
+				sys.stderr.write("error")
+				sys.stderr.write(e)
+
+				
+
+	filenames = ["images/"+str(index)+".jpg" for index in indices]
+	raw_imgs = [tf.read_file(filename) for filename in filenames]
+	img_tensors = [(tf.image.decode_image(raw_img - 128)) / 128 for raw_img in raw_imgs]
+
+	return img_tensors
 
 
 def loadAllTrainingImages():
@@ -276,8 +291,27 @@ def loadAllTrainingY(filepath):
 	return y_train
 
 
+def getYIntoNpMatrix(y_train, max_y):
+	y = np.zeros((len(y_train), y_train[1].shape[0]))
+
+	for i in range(len(y_train)):
+		try:
+			# row_number = y_train[i][0]
+			# row_x = x_train[i][1]
+			row_y = y_train[i]
+
+			y[i, :] = row_y.astype(np.uint8)
+			# x[row_number, :, :, :] = row_x
+			# x[i] = row_x
+		except:
+			print("i", i, len(x))
+
+	# x = np.array(x)
+	return y
+
+
 def main():
-	x_train = loadAllTrainingImages()
+	# x_train = loadAllTrainingImages()
 
 	os.system('touch tmp/data_one_hot.csv')
 	with open('tmp/data_one_hot.csv', 'wb+') as file_to:
@@ -286,7 +320,10 @@ def main():
 			client.download_blob_to_file(blob, file_to)
 	y_train = loadAllTrainingY('tmp/data_one_hot.csv')
 
-	x_train, y_train = getTrainingDataInSameOrder(x_train, y_train)
+	max_y = max(y_train.keys())
+
+	# x_train, y_train = getTrainingDataInSameOrder(x_train, y_train)
+	y_train = getYIntoNpMatrix(y_train, max_y)
 
 	gen_model = generator(y_train[0].shape[0] + 50)
 	disc_model = discriminator(19 + 250 + 1)
@@ -304,7 +341,7 @@ def main():
 	adversarial_model.add(disc_model)
 	adversarial_model.compile(loss='categorical_crossentropy', optimizer=adversarial_optimizer, metrics=['accuracy'])
 
-	train(gen_model, discriminator_model, adversarial_model, x_train, y_train, 19, 250)
+	train(gen_model, discriminator_model, adversarial_model, y_train, 19, 250)
 
 
 if __name__ == "__main__":
