@@ -107,10 +107,10 @@ def train(gen_model, disc_model, adv_model, y_train, number_of_categories, numbe
 	adv_loss = np.array([0., 0.])
 
 	for i in range(number_epochs):
-		indices = np.random.randint(0, y_train.shape[0], size=batch_size)
+		indices = np.random.randint(0, y_train.shape[0], size=3*batch_size) # Get triple the indices just to be safe
 		# real_images = x_train[indices]  # TODO: Need to get the training images somehow
-		real_images = loadTrainingData(indices)
-		real_y = y_train[indices, :]
+		real_images, applicable_indices = loadTrainingData(indices, batch_size)
+		real_y = y_train[applicable_indices, :]
 
 		noise = np.random.uniform(-1., 1., size=[batch_size, 50])
 		noise = np.concatenate((noise, real_y), axis=1)
@@ -192,11 +192,15 @@ def getTrainingDataInSameOrder(x_train, y_train):
 # def tempDownloadFiles():
 # 	# urllib.request.Request('gs://recipes-with-images/')
 
-def loadTrainingData(indices):
+def loadTrainingData(indices, batch_size):
 	# Indices correspond to image file names
 	# TODO: Maybe I should load all images at once??
+	# print("blobs", list(image_blobs)[0].name, list(image_blobs)[0].name[7: -4])
+	print([(blob.name, blob.name[7:-4]) for blob in image_blobs])
 	applicable_image_blobs = [blob for blob in image_blobs if int(blob.name[7:-4]) in indices]
 
+	print("loading training data")
+	os.system("mkdir tmp/images")
 	for blob in applicable_image_blobs:
 		filename = 'tmp/' + str(blob.name)
 		with open(filename, 'wb+') as file_to:
@@ -205,14 +209,33 @@ def loadTrainingData(indices):
 			except e:
 				sys.stderr.write("error")
 				sys.stderr.write(e)
+	
+	filenames = os.listdir('tmp/images/')
 
-				
+	raw_imgs = []
+	applicable_indices = []
+	for filepath in filepaths:
+		try:
+			image = cv2.imread(filepath[1])
+			_id = filepath[0]
 
-	filenames = ["images/"+str(index)+".jpg" for index in indices]
-	raw_imgs = [tf.read_file(filename) for filename in filenames]
-	img_tensors = [(tf.image.decode_image(raw_img - 128)) / 128 for raw_img in raw_imgs]
+			if (filepath[0][0] != "." and filepath[0] != 'im' and not isinstance(image, type(None))):
+				raw_imgs.append((_id, image))
+				applicable_indices.append(_id)
+			if len(raw_imgs) == batch_size:
+				break
+		except:
+			sys.stderr.write("Something went wrong with raw images")
 
-	return img_tensors
+	# raw_imgs = [(filepath[0], cv2.imread(filepath[1])) for filepath in filepaths if (filepath[0][0] != "." and filepath[0] != 'im')]
+	# print("raw_imgs", raw_imgs)
+	# raw_imgs = [(filepath[0], cv2.cvtColor(cv2.imread(filepath[1]), cv2.COLOR_BGR2RGB)) for filepath in filepaths]
+	img_tensors = [(int(raw_img[0]), ((raw_img[1].astype(np.int16) - 128) / 128)) for raw_img in raw_imgs]
+
+	os.system("rm -rf tmp/images")
+	print("done loading training data")
+
+	return img_tensors, applicable_indices
 
 
 def loadAllTrainingImages():
@@ -279,9 +302,10 @@ def loadAllTrainingY(filepath):
 	y_train = {}
 
 	# with open(filepath, 'r') as input_file:
-	with tf.io.gfile.GFile(filepath, 'r') as input_file:
+	with open(filepath, 'r') as input_file:
 		csv_reader = csv.reader(input_file, delimiter=",")
 
+		print("read_rows")
 		for row in csv_reader:
 			_id = int(row[0])
 			one_hot_encoded = row[1:]
@@ -304,7 +328,7 @@ def getYIntoNpMatrix(y_train, max_y):
 			# x[row_number, :, :, :] = row_x
 			# x[i] = row_x
 		except:
-			print("i", i, len(x))
+			print("i", i, len(y))
 
 	# x = np.array(x)
 	return y
@@ -312,22 +336,28 @@ def getYIntoNpMatrix(y_train, max_y):
 
 def main():
 	# x_train = loadAllTrainingImages()
+	print("in main")
 
 	os.system('touch tmp/data_one_hot.csv')
-	with open('tmp/data_one_hot.csv', 'wb+') as file_to:
-		blobs = bucket.list_blobs(prefix='data_one_hot.csv')
-		for blob in blobs:
-			client.download_blob_to_file(blob, file_to)
+
+	# TODO: Uncomment this!!!
+	# with open('tmp/data_one_hot.csv', 'wb+') as file_to:
+	# 	blobs = bucket.list_blobs(prefix='data_one_hot.csv')
+	# 	for blob in blobs:
+	# 		client.download_blob_to_file(blob, file_to)
 	y_train = loadAllTrainingY('tmp/data_one_hot.csv')
 
 	max_y = max(y_train.keys())
 
 	# x_train, y_train = getTrainingDataInSameOrder(x_train, y_train)
 	y_train = getYIntoNpMatrix(y_train, max_y)
+	print("past y_train building", y_train.shape)
+
 
 	gen_model = generator(y_train[0].shape[0] + 50)
 	disc_model = discriminator(19 + 250 + 1)
 
+	print("about to compile models")
 	discriminator_optimizer = tf.keras.optimizers.RMSprop(lr=4e-4)
 
 	discriminator_model = tf.keras.models.Sequential()
@@ -340,6 +370,7 @@ def main():
 	adversarial_model.add(gen_model)
 	adversarial_model.add(disc_model)
 	adversarial_model.compile(loss='categorical_crossentropy', optimizer=adversarial_optimizer, metrics=['accuracy'])
+	print("about to train")
 
 	train(gen_model, discriminator_model, adversarial_model, y_train, 19, 250)
 
