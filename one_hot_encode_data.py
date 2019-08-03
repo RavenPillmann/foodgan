@@ -5,8 +5,10 @@
 
 import csv
 
-CATEGORIES = ['beef', 'bread', 'breakfast', 'cheese', 'dessert', 'dimsum', 'fish', 'fruit', 'mushroom', 'noodle', 'pasta', 'pizza', 'pork',
-	'potato', 'poultry', 'salad', 'sandwich', 'soup', 'vegetables']
+CATEGORIES = ['beef', 'bread', 'breakfast', 'cheese', 'dessert',
+	'dimsum', 'fish', 'fruit', 'mushroom', 'noodle',
+	'pasta', 'pizza', 'pork', 'potato', 'poultry',
+	'salad', 'sandwich', 'soup', 'vegetables']
 
 def getNMostCommonIngredients(n):
 	most_common_ingredients = []
