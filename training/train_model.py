@@ -12,20 +12,15 @@ from google.cloud import storage
 client = storage.Client()
 bucket = client.get_bucket('recipes-with-images')
 
-# parser = argparse.ArgumentParser(description="Training")
+image_blobs_from_bucket = bucket.list_blobs(prefix='images')
 
-# parser.add_argument('--images-path', '-i', dest="images")
-# parser.add_argument('--one-hot-data-path', '-d', dest="data")
+pages = image_blobs_from_bucket.pages
 
-# args = parser.parse_args()
-# args = vars(args)
+image_blobs = []
 
-# args = {
-# 	'images': 'gs://recipes-with-images/images/',
-# 	'data': 'gs://recipes-with-images/data_one_hot.csv'
-# }
-
-image_blobs = bucket.list_blobs(prefix='images')
+for page in pages:
+	list_of_blobs = list(page)
+	image_blobs.extend(list_of_blobs)
 
 disc_dropout = 0.5
 gen_dropout = 0.5
@@ -36,7 +31,7 @@ def addConvLayer(model, number_of_kernels, input_shape=None, activation='leaky_r
 		model.add(tf.keras.layers.Conv2D(number_of_kernels, kernel_size=3, input_shape=input_shape, padding='same'))
 	else:
 		model.add(tf.keras.layers.Conv2D(number_of_kernels, kernel_size=3, strides=2, padding='same'))
-	model.add(tf.keras.layers.BatchNormalization())
+	# model.add(tf.keras.layers.BatchNormalization())
 	# model.add(tf.keras.layers.Activation(activation))
 	model.add(tf.keras.layers.LeakyReLU(alpha=0.02))
 	if dropout_rate:
@@ -66,7 +61,7 @@ def discriminator(number_output):
 	addDenseLayer(model, 500, dropout_rate=disc_dropout)
 
 	model.add(tf.keras.layers.Dense(number_output))
-	model.add(tf.keras.layers.Activation('sigmoid')) # TODO: Which activation to use? Multiple values should be set to 1, not just one
+	model.add(tf.keras.layers.Activation('softmax')) # TODO: Which activation to use? Multiple values should be set to 1, not just one
 
 	return model
 
@@ -94,13 +89,13 @@ def generator(number_input):
 	addDeconvolutionLayer(model, 16, 5, 2) # 150 > 300
 
 	model.add(tf.keras.layers.Conv2DTranspose(3, 5, padding='same'))
-	model.add(tf.keras.layers.Activation('tanh'))
+	model.add(tf.keras.layers.Activation('sigmoid'))
 
 	return model
 
 
 def train(gen_model, disc_model, adv_model, y_train, number_of_categories, number_of_ingredients):
-	number_epochs = 10000
+	number_epochs = 1000
 	batch_size = 64
 
 	disc_loss = np.array([0., 0.])
@@ -113,18 +108,20 @@ def train(gen_model, disc_model, adv_model, y_train, number_of_categories, numbe
 		real_y = y_train[applicable_indices, :]
 
 		noise = np.random.uniform(-1., 1., size=[batch_size, 50])
+		print("shapes", real_y.shape, noise.shape, y_train.shape)
 		noise = np.concatenate((noise, real_y), axis=1)
 
 		fake_images = gen_model.predict(noise)
 		# fake_images = fake_images[:, :, :, :]
 
-		x = np.concatenate((real_images, fake_images)).reshape(-1, 300, 300, 3)
+		# print("image shapes", real_images, fake_images)
+		x = np.concatenate((real_images, fake_images)).reshape(-1, 256, 256, 3)
 
 		# print("number of categories", number_of_categories)
 		# print("number_of_ingredients", number_of_ingredients)
 		fake_y = np.vstack((np.zeros((number_of_categories + number_of_ingredients, batch_size)), np.ones((1, batch_size))))
 
-		# print("shapes", real_y.T.shape, fake_y.shape)
+		print("shapes", real_y.T.shape, fake_y.shape)
 		y = np.hstack((real_y.T, fake_y))
 		# print("y shape", y.shape)
 
@@ -153,16 +150,11 @@ def train(gen_model, disc_model, adv_model, y_train, number_of_categories, numbe
 		if i % 50 == 0:
 			print(i, "disc_loss:", (disc_loss / (i + 1)), "adv_loss:", (adv_loss / (i + 1)))
 			os.system("mkdir saved_gen_models")
-			file_name = "saved_gen_models/" + str(i) + ".h5"
+			file_name = "saved_gen_models_only_20/" + str(i) + ".h5"
 			gen_model.save(file_name)
-			os.system("gsutil cp -r saved_gen_models/"+str(i)+".h5 gs://recipes-with-images/saved_gen_models/"+str(i)+".h5")
+			os.system("gsutil cp -r saved_gen_models_only_20/"+str(i)+".h5 gs://recipes-with-images/saved_gen_models/"+str(i)+".h5")
 			# client.download_blob_to_file("saved_gen_models/" + str(i) + ".h5", 'gs://recipes-with-images/saved_gen_models')
 
-
-
-
-		# TODO: need to build random array of options
-		# So for the first 19, needs to be just one category chosen. For the next 250, can be random number
 
 def getTrainingDataInSameOrder(x_train, y_train):
 	number_training_instances = len(x_train)
@@ -170,8 +162,6 @@ def getTrainingDataInSameOrder(x_train, y_train):
 	x = np.zeros((number_training_instances, 300, 300, 3))
 	x = [None] * number_training_instances
 
-	# HOW DO I GET AROUND THIS
-	# We have
 	for i in range(len(x_train)):
 		try:
 			row_number = x_train[i][0]
@@ -189,14 +179,7 @@ def getTrainingDataInSameOrder(x_train, y_train):
 	return x, y
 
 
-# def tempDownloadFiles():
-# 	# urllib.request.Request('gs://recipes-with-images/')
-
 def loadTrainingData(indices, batch_size):
-	# Indices correspond to image file names
-	# TODO: Maybe I should load all images at once??
-	# print("blobs", list(image_blobs)[0].name, list(image_blobs)[0].name[7: -4])
-	print([(blob.name, blob.name[7:-4]) for blob in image_blobs])
 	applicable_image_blobs = [blob for blob in image_blobs if int(blob.name[7:-4]) in indices]
 
 	print("loading training data")
@@ -211,13 +194,14 @@ def loadTrainingData(indices, batch_size):
 				sys.stderr.write(e)
 	
 	filenames = os.listdir('tmp/images/')
-
 	raw_imgs = []
 	applicable_indices = []
+
+	filepaths = [(name[:-4], 'tmp/images/'+str(name)) for name in filenames]
 	for filepath in filepaths:
 		try:
 			image = cv2.imread(filepath[1])
-			_id = filepath[0]
+			_id = int(filepath[0])
 
 			if (filepath[0][0] != "." and filepath[0] != 'im' and not isinstance(image, type(None))):
 				raw_imgs.append((_id, image))
@@ -227,15 +211,16 @@ def loadTrainingData(indices, batch_size):
 		except:
 			sys.stderr.write("Something went wrong with raw images")
 
-	# raw_imgs = [(filepath[0], cv2.imread(filepath[1])) for filepath in filepaths if (filepath[0][0] != "." and filepath[0] != 'im')]
-	# print("raw_imgs", raw_imgs)
-	# raw_imgs = [(filepath[0], cv2.cvtColor(cv2.imread(filepath[1]), cv2.COLOR_BGR2RGB)) for filepath in filepaths]
-	img_tensors = [(int(raw_img[0]), ((raw_img[1].astype(np.int16) - 128) / 128)) for raw_img in raw_imgs]
+	img_tensors = [(int(raw_img[0]), cv2.resize(raw_img[1].astype(np.int16)/ 255., (256, 256))) for raw_img in raw_imgs]
+	x = [None] * batch_size
+	for idx in range(len(img_tensors)):
+		im_tens = img_tensors[idx][1]
+		x[idx] = im_tens
 
 	os.system("rm -rf tmp/images")
 	print("done loading training data")
 
-	return img_tensors, applicable_indices
+	return np.array(x), np.array(applicable_indices)
 
 
 def loadAllTrainingImages():
@@ -244,14 +229,8 @@ def loadAllTrainingImages():
 	os.system("mkdir tmp/images/images")
 
 	blobs = bucket.list_blobs(prefix='images')
-	# print("all training images")
 
-	# i = 0
 	for blob in blobs:
-		# print("blob", blob)
-		# i += 1
-		# if i > 2:
-		# 	break
 		filename = 'tmp/' + str(blob.name)
 		with open(filename, 'wb+') as file_to:
 			try:
@@ -260,23 +239,10 @@ def loadAllTrainingImages():
 				sys.stderr.write("error")
 				sys.stderr.write(e)
 
-	# print("past downloading")
-
-	# print("im im",os.system("ls tmp/images/images"))
-	# print("im", os.system("ls tmp/images"))
-
-	# with open('tmp/images') as directory:
-		# client.download_blob_to_file('gs://recipes-with-images/images', directory)
-
 	filenames = os.listdir('tmp/images/')
-	# filenames = bucket.list_blobs('/images/')
 
 	os.system("rm -rf tmp/images/images")
 	filepaths = [(name[:-4], 'tmp/images/'+str(name)) for name in filenames]
-	# print("filepaths", filepaths)
-	# cv2.imread(filepaths[0][1])
-	# cv2.imshow("im", im)
-	# cv2.waitKey(1000)
 
 	raw_imgs = []
 	for filepath in filepaths:
@@ -292,7 +258,7 @@ def loadAllTrainingImages():
 	# raw_imgs = [(filepath[0], cv2.imread(filepath[1])) for filepath in filepaths if (filepath[0][0] != "." and filepath[0] != 'im')]
 	# print("raw_imgs", raw_imgs)
 	# raw_imgs = [(filepath[0], cv2.cvtColor(cv2.imread(filepath[1]), cv2.COLOR_BGR2RGB)) for filepath in filepaths]
-	img_tensors = [(int(raw_img[0]), ((raw_img[1].astype(np.int16) - 128) / 128)) for raw_img in raw_imgs]
+	img_tensors = [(int(raw_img[0]), cv2.resize(raw_img[1].astype(np.int16) / 255., (256, 256))) for raw_img in raw_imgs]
 	# print("img_tensors", img_tensors)
 
 	return img_tensors
@@ -310,7 +276,8 @@ def loadAllTrainingY(filepath):
 			_id = int(row[0])
 			one_hot_encoded = row[1:]
 			# print("len one_hot_encoded", len(one_hot_encoded))
-			y_train[_id] = np.hstack((np.array(one_hot_encoded), np.array([0])))
+			# y_train[_id] = np.hstack((np.array(one_hot_encoded), np.array([0])))
+			y_train[_id] = np.hstack((np.array(one_hot_encoded[:20]), np.array([0])))
 
 	return y_train
 
@@ -335,16 +302,23 @@ def getYIntoNpMatrix(y_train, max_y):
 
 
 def main():
-	# x_train = loadAllTrainingImages()
-	print("in main")
+	from tensorflow.python.client import device_lib
+	print("local devices", device_lib.list_local_devices())
 
+	config = tf.ConfigProto( device_count = {'GPU': 1 , 'CPU': 1} ) 
+	sess = tf.Session(config=config) 
+	tf.keras.backend.set_session(sess)
+
+	# x_train = loadAllTrainingImages()
+	# print("in main")
+	os.system('mkdir tmp')
 	os.system('touch tmp/data_one_hot.csv')
 
 	# TODO: Uncomment this!!!
-	# with open('tmp/data_one_hot.csv', 'wb+') as file_to:
-	# 	blobs = bucket.list_blobs(prefix='data_one_hot.csv')
-	# 	for blob in blobs:
-	# 		client.download_blob_to_file(blob, file_to)
+	with open('tmp/data_one_hot.csv', 'wb+') as file_to:
+		blobs = bucket.list_blobs(prefix='data_one_hot.csv')
+		for blob in blobs:
+			client.download_blob_to_file(blob, file_to)
 	y_train = loadAllTrainingY('tmp/data_one_hot.csv')
 
 	max_y = max(y_train.keys())
@@ -355,7 +329,7 @@ def main():
 
 
 	gen_model = generator(y_train[0].shape[0] + 50)
-	disc_model = discriminator(19 + 250 + 1)
+	disc_model = discriminator(19 + 1)
 
 	print("about to compile models")
 	discriminator_optimizer = tf.keras.optimizers.RMSprop(lr=4e-4)
@@ -372,7 +346,7 @@ def main():
 	adversarial_model.compile(loss='categorical_crossentropy', optimizer=adversarial_optimizer, metrics=['accuracy'])
 	print("about to train")
 
-	train(gen_model, discriminator_model, adversarial_model, y_train, 19, 250)
+	train(gen_model, discriminator_model, adversarial_model, y_train, 19, 0)
 
 
 if __name__ == "__main__":
