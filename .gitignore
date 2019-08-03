@@ -4,3 +4,7 @@ query_log.log
 run_query.py
 __pycache__
 *.csv
+counts
+data
+data_training
+static
