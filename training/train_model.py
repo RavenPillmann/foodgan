@@ -96,6 +96,7 @@ def generator(number_input):
 
 def train(gen_model, disc_model, adv_model, y_train, number_of_categories, number_of_ingredients):
 	number_epochs = 1000
+
 	batch_size = 64
 
 	disc_loss = np.array([0., 0.])
@@ -154,7 +155,6 @@ def train(gen_model, disc_model, adv_model, y_train, number_of_categories, numbe
 			gen_model.save(file_name)
 			os.system("gsutil cp -r saved_gen_models_only_20/"+str(i)+".h5 gs://recipes-with-images/saved_gen_models/"+str(i)+".h5")
 			# client.download_blob_to_file("saved_gen_models/" + str(i) + ".h5", 'gs://recipes-with-images/saved_gen_models')
-
 
 def getTrainingDataInSameOrder(x_train, y_train):
 	number_training_instances = len(x_train)
@@ -272,6 +272,7 @@ def loadAllTrainingY(filepath):
 		csv_reader = csv.reader(input_file, delimiter=",")
 
 		print("read_rows")
+
 		for row in csv_reader:
 			_id = int(row[0])
 			one_hot_encoded = row[1:]
@@ -347,6 +348,7 @@ def main():
 	print("about to train")
 
 	train(gen_model, discriminator_model, adversarial_model, y_train, 19, 0)
+
 
 
 if __name__ == "__main__":
