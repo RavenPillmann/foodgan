@@ -39,12 +39,12 @@ def flask_app(model):
 		# Pass back
 		filename = str(int(time.time())) + ".jpg"
 		# TODO: Save image
-		cv2.imwrite("./static/"+filename, cv2.cvtColor(np.around(img).astype('uint8'), cv2.COLOR_BGR2RGB))
+		cv2.imwrite(filename, cv2.cvtColor(np.around(img).astype('uint8'), cv2.COLOR_BGR2RGB))
 		# im = Image.fromarray(img)
 		# im.save("./static/"+filename)
 
 
-		os.system("gsutil cp ./static/" + filename + " gs://recipe_images_111/" + filename)
+		os.system("gsutil cp " + filename + " gs://recipe_images_111/" + filename)
 
 		return "https://console.cloud.google.com/storage/browser/recipe_images_111/"+filename
 
@@ -78,7 +78,7 @@ def flask_app(model):
 
 
 def main():
-	os.system("mkdir static")
+#	os.system("mkdir static")
 	model = load_model(args['model'])
 	global graph
 	graph = tf.get_default_graph()
